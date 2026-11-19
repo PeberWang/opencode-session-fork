@@ -8,7 +8,21 @@ OpenCode Desktop 的 GUI 插件。在助手消息里划选一段文字，点「F
 
 设计与证据见 `DESIGN_FORK.md`，验收见 `ACCEPTANCE.md`。
 
-## 最近一次改动（2026-11-19，`BRIEF_fork_fixes.md`）
+## 最近一次改动（2026-11-19 第二轮，`BRIEF_fork_fixes2.md`）
+
+三处缺陷（草稿没进面板、面板的叉关不掉、标签的叉关不掉）是同一个根因：
+- 面板里的 fork id 每次都通过 `props.tab` 现读。宿主一删掉标签，`props.tab` 就会抛错（宿主内部是 `entry()!.tab`，见 `panels.tsx`），而我们的 memo 和 cleanup 正在宿主关闭的那一批更新里重跑，于是关闭中途断掉。
+- 草稿那一处：Fork 用的是 `tab: "open"`，会复用 preview 槽，顺手把上一个 Fork 标签关掉，走的正是这条抛错路径，把新面板的写入一起打断了。
+
+改法：
+- fork id 在挂载时读一次，之后固定不变。
+- 打开方式改成 `tab: "select"`，不再顶掉旧的 Fork 标签。
+- 草稿改存 `ctx.storage.memory`（插件重载后还在），textarea 挂载时直接把值写进去。
+- 关闭标签时清掉该草稿，分叉会话本身留在服务端。
+
+依据是宿主源码的静态分析（`.research/src-extract/`，从包内 sourcemap 抽出），**没有做真机复现**：读 `renderer.log` 的授权请求无人确认。typecheck、test 5/5、build 都通过。生效需要**重启桌面端**。
+
+## 上一次改动（2026-11-19，`BRIEF_fork_fixes.md`）
 
 改了什么（只动 `src/gui.tsx` 和构建产物）：
 - **Fork 出现的时机**：按住鼠标拖选期间一律不显示，松手后才评估选区。宿主浮条出现时，Fork 并进同一条浮条，和 Copy 并列；宿主浮条 400ms 内没出现，才用自绘浮条兜底。

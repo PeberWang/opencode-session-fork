@@ -1,6 +1,6 @@
 import { Panel, Plugin, Style, type MountedSession, type PanelProps } from "@opencode/plugin/gui"
 import type { SessionMessageInfo } from "@opencode/client/promise"
-import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js"
 import { boundaryIn, compareMessageIds, draftText, forkTitle, parsePartId } from "./core.ts"
 import css from "./style.css?inline"
 
@@ -54,13 +54,20 @@ export default Plugin.define({
   setup(ctx) {
     ctx.add(Style, css)
 
-    // Drafts and pending focus live for this window's run; the fork session itself is on the server.
-    const drafts = new Map<string, ReturnType<typeof createSignal<string>>>()
-    const draft = (forkID: string) => {
-      let entry = drafts.get(forkID)
-      if (!entry) drafts.set(forkID, (entry = createSignal("")))
-      return entry
-    }
+    // Drafts live in window memory, which outlasts a plugin reload; the fork session itself is on the server.
+    const [drafts, setDrafts] = ctx.storage.memory<{ text: Record<string, string> }>("drafts", { initial: { text: {} } })
+    const draft = (forkID: string) =>
+      [
+        () => drafts.text[forkID] ?? "",
+        (value: string) =>
+          setDrafts((store) => {
+            store.text[forkID] = value
+          }),
+      ] as const
+    const dropDraft = (forkID: string) =>
+      setDrafts((store) => {
+        delete store.text[forkID]
+      })
     const pendingFocus = new Set<string>()
     const inputs = new Map<string, HTMLTextAreaElement>()
     const focusInput = (forkID: string) => {
@@ -129,7 +136,8 @@ export default Plugin.define({
         pendingFocus.add(created.id)
         window.getSelection()?.removeAllRanges()
         hide()
-        ctx.layout.open(`${ctx.id}:${TAB_PREFIX}${created.id}`, session, { tab: "open" })
+        // `select`, not `open`: an `open` reuses the preview slot, which would close the previous fork's tab.
+        ctx.layout.open(`${ctx.id}:${TAB_PREFIX}${created.id}`, session, { tab: "select" })
       } catch (error) {
         console.error("[session-fork]", error)
         ctx.toast.show({ variant: "error", title: ctx.t("fork.failed"), description: String(error) })
@@ -268,7 +276,11 @@ export default Plugin.define({
     }
 
     function ForkView(props: PanelProps) {
-      const forkID = () => props.tab.id.slice(TAB_PREFIX.length)
+      // Read once: a render belongs to one tab, and once the host drops the tab `props.tab` throws, which would abort
+      // the host's close from inside our memos and cleanups.
+      const id = untrack(() => props.tab.id.slice(TAB_PREFIX.length))
+      const forkID = () => id
+      const key = `${ctx.id}:${TAB_PREFIX}${id}`
       const server = () => props.session.server
       const data = () => server().data
       const [text, setText] = draft(forkID())
@@ -297,7 +309,7 @@ export default Plugin.define({
       const permissions = () => data().session.permission.list(forkID()) ?? []
 
       const openTab = () => ctx.tabs.open({ server: server().id, id: forkID() }, { focus: true })
-      const close = () => ctx.layout.close(`${ctx.id}:${props.tab.id}`, props.session)
+      const close = () => ctx.layout.close(key, props.session)
       const stop = () => void server().client.session.interrupt({ sessionID: forkID() }).catch(() => {})
       const send = async () => {
         const value = text().trim()
@@ -351,6 +363,8 @@ export default Plugin.define({
             <textarea
               ref={(element) => {
                 inputs.set(forkID(), element)
+                // The draft is in place before the first frame, so the caret can land at its end.
+                element.value = text()
                 onCleanup(() => inputs.get(forkID()) === element && inputs.delete(forkID()))
                 // Lands the caret once the panel is on screen, right after a fork.
                 requestAnimationFrame(() => pendingFocus.delete(forkID()) && focusInput(forkID()))
@@ -440,6 +454,8 @@ export default Plugin.define({
       },
       list: (input) => input.open.filter((id) => id.startsWith(TAB_PREFIX)).map(tabFor),
       render: (props) => <ForkView {...props} />,
+      // The fork session stays on the server; only its unsent draft goes.
+      close: (input) => dropDraft(input.tab.id.slice(TAB_PREFIX.length)),
       focus: (input) => {
         if (!input.restored) requestAnimationFrame(() => focusInput(input.tab.id.slice(TAB_PREFIX.length)))
       },
