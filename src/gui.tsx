@@ -1,6 +1,7 @@
 import { Panel, Plugin, Style, type MountedSession, type PanelProps } from "@opencode/plugin/gui"
 import type { SessionMessageInfo } from "@opencode/client/promise"
-import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js"
+import { createData } from "@opencode/client/solid"
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js"
 import { boundaryIn, compareMessageIds, draftText, forkTitle, parsePartId } from "./core.ts"
 import css from "./style.css?inline"
 
@@ -21,7 +22,6 @@ export default Plugin.define({
       "fork.failed": "Fork failed",
       "panel.title": "Fork",
       "panel.openTab": "Open in tab",
-      "panel.close": "Close",
       "panel.stop": "Stop",
       "panel.running": "Generating…",
       "panel.placeholder": "Ask about the selection… (Enter to send, Shift+Enter for a new line)",
@@ -37,7 +37,6 @@ export default Plugin.define({
       "fork.title": "从这里分叉：新会话带上到这条消息为止的历史",
       "fork.failed": "分叉失败",
       "panel.openTab": "在标签页打开",
-      "panel.close": "关闭",
       "panel.stop": "停止",
       "panel.running": "生成中…",
       "panel.placeholder": "就所选内容追问…（Enter 发送，Shift+Enter 换行）",
@@ -280,7 +279,6 @@ export default Plugin.define({
       // the host's close from inside our memos and cleanups.
       const id = untrack(() => props.tab.id.slice(TAB_PREFIX.length))
       const forkID = () => id
-      const key = `${ctx.id}:${TAB_PREFIX}${id}`
       const server = () => props.session.server
       const data = () => server().data
       const [text, setText] = draft(forkID())
@@ -288,19 +286,44 @@ export default Plugin.define({
       // Tells "still loading" from "the fork has no messages" once the first message sync settles.
       const [loaded, setLoaded] = createSignal(false)
 
+      // The host keeps messages only for sessions in shell tabs plus the last few viewed (`createSessionRetention`,
+      // limit 3), and evicts the rest whenever its session list changes: a fork that lives only in this panel lost its
+      // messages, and the stream into them, on the first update after a send. The transcript lives in a Data of our own
+      // on the host's event stream instead, which no retention touches; a new server controller gets a new one.
+      const transcript = createMemo(() => {
+        const host = data()
+        return untrack(() =>
+          createData({
+            api: () => server().client,
+            directory: "",
+            event: { on: host.on, listen: host.listen },
+            connection: { status: () => (server().connected ? "connected" : "reconnecting") },
+            omitToolFileData: true,
+          }),
+        )
+      })
+      createEffect(() => {
+        if (!server().connected) return
+        const own = transcript()
+        untrack(() => {
+          void own.session.message
+            .sync(forkID())
+            .then(() => {
+              if (own.session.message.more(forkID())) return own.session.message.loadMore(forkID(), { all: true })
+            })
+            .catch(() => {})
+            .finally(() => setLoaded(true))
+        })
+      })
       onMount(() => {
         void data().session.sync(forkID()).catch(() => {})
-        void data()
-          .session.message.sync(forkID())
-          .catch(() => {})
-          .finally(() => setLoaded(true))
         void data().session.permission.sync(forkID()).catch(() => {})
       })
 
       const info = createMemo(() => data().session.list().find((session) => session.id === forkID()))
       const messages = createMemo(() =>
         // Copies keep their original times; ids break ties (copies end in a numeric `_<n>`).
-        [...data().session.message.list(forkID())].sort(
+        [...transcript().session.message.list(forkID())].sort(
           (a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0) || compareMessageIds(a.id, b.id),
         ),
       )
@@ -309,14 +332,14 @@ export default Plugin.define({
       const permissions = () => data().session.permission.list(forkID()) ?? []
 
       const openTab = () => ctx.tabs.open({ server: server().id, id: forkID() }, { focus: true })
-      const close = () => ctx.layout.close(key, props.session)
       const stop = () => void server().client.session.interrupt({ sessionID: forkID() }).catch(() => {})
       const send = async () => {
         const value = text().trim()
         if (!value || sending()) return
         setSending(true)
         try {
-          await data().session.prompt({ sessionID: forkID(), text: value })
+          // Through our Data, so the message shows at once and the reply streams into the same store.
+          await transcript().session.prompt({ sessionID: forkID(), text: value })
           setText("")
         } catch (error) {
           ctx.toast.show({ variant: "error", title: ctx.t("fork.failed"), description: String(error) })
@@ -327,6 +350,14 @@ export default Plugin.define({
 
       let list: HTMLDivElement | undefined
       const follow = () => list && (list.scrollTop = list.scrollHeight)
+      // A streaming reply grows in place; keep it in view unless the reader has scrolled up.
+      let pinned = true
+      const onScroll = () => list && (pinned = list.scrollHeight - list.scrollTop - list.clientHeight < 48)
+      createEffect(() => {
+        const last = messages().at(-1)
+        if (last?.type === "assistant") for (const part of last.content) if (part.type === "text") void part.text.length
+        if (pinned) requestAnimationFrame(follow)
+      })
 
       return (
         <div class="session-fork-panel" {...{ [OWN]: "" }}>
@@ -338,9 +369,8 @@ export default Plugin.define({
             <ctx.ui.Button size="small" variant="ghost" onClick={openTab}>
               {ctx.t("panel.openTab")}
             </ctx.ui.Button>
-            <ctx.ui.IconButton icon="close-small" label={ctx.t("panel.close")} onClick={close} />
           </div>
-          <div class="session-fork-messages" ref={(element) => (list = element)}>
+          <div class="session-fork-messages" ref={(element) => (list = element)} onScroll={onScroll}>
             <Show
               when={messages().length > 0}
               fallback={<div class="session-fork-muted">{ctx.t(loaded() ? "panel.empty" : "panel.loading")}</div>}

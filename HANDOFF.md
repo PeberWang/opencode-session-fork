@@ -8,7 +8,22 @@ OpenCode Desktop 的 GUI 插件。在助手消息里划选一段文字，点「F
 
 设计与证据见 `DESIGN_FORK.md`，验收见 `ACCEPTANCE.md`。
 
-## 最近一次改动（2026-11-19 第二轮，`BRIEF_fork_fixes2.md`）
+## 最近一次改动（2026-11-19 第三轮，`BRIEF_fork_fixes3.md`）
+
+**面板发消息后不显示**：根因是宿主的会话保留机制，不在渲染层。
+- 宿主对每个服务端调用 `createSessionRetention({ keep: 标签页里的会话, limit: 3 })`，见 renderer `main-*.js` 里 `cJt({session:f.session,…,limit:3})`。
+- 不在 keep 里、也不是最近查看过的会话，每当会话列表一变，就会被 `evict`：`store.session.message[id]` 和 `messageIndex` 被删掉，之后的 `step.started`、`text.delta` 也因为找不到索引而全部丢弃。
+- 分叉会话只开在侧栏里，所以 Fork 之后第一次会话信息更新（发送后的 usage、状态变化）就会把它清空。首次挂载时 sync 来的历史能看到，就是因为那时列表还没变。关闭再打开会重新 sync，所以能看到最新内容：缺的是订阅，不缺持久化。
+
+改法：
+- 面板用宿主提供的 `@opencode/client/solid` 的 `createData` 自建一个私有 Data，挂在同一条宿主事件流（`host.on` / `host.listen`）上。转录读写都走它，发送也走它的 `session.prompt`，所以本地消息立刻出现，回复流式进入同一个 store。
+- 宿主的 retention 管不到这个私有实例。会话信息、运行状态、授权仍然读宿主 Data。
+- 服务端控制器换代或者重连之后，会重建私有实例并重新 sync，挂载时会把完整历史一次拉齐（`loadMore all`）。
+- 回复增长时自动滚到底部；用户往上翻过就不再跟随。
+
+**去掉面板内的叉**：关闭统一交给标签栏。
+
+## 第二轮改动（2026-11-19，`BRIEF_fork_fixes2.md`）
 
 三处缺陷（草稿没进面板、面板的叉关不掉、标签的叉关不掉）是同一个根因：
 - 面板里的 fork id 每次都通过 `props.tab` 现读。宿主一删掉标签，`props.tab` 就会抛错（宿主内部是 `entry()!.tab`，见 `panels.tsx`），而我们的 memo 和 cleanup 正在宿主关闭的那一批更新里重跑，于是关闭中途断掉。
