@@ -1,4 +1,71 @@
-# ACCEPTANCE — 划选即 Fork（2026-11-19）
+# ACCEPTANCE — 划选即 Fork
+
+## 第二轮：两处缺陷修复（2026-11-19，任务书 `BRIEF_fork_fixes.md`）
+
+环境：OpenCode Desktop 2.3.0，插件 SDK `@opencode/plugin@2.3.0`。改动只在 `src/gui.tsx`，**必须重启桌面端才生效**（桌面端只在启动时加载插件 GUI）。
+
+### 修了什么
+
+**缺陷一：Fork 在鼠标未松开时就出现。**
+- 原因：旧逻辑每次 `selectionchange` 都评估选区，拖拽中只要过 250ms 宿主浮条还没出现，就弹出自绘浮条；宿主浮条要松手后才出现，于是 Fork 先单独出现，再并入。
+- 修法：左键在页面上按下即进入拖拽态，立刻隐藏 Fork；拖拽期间 `selectionchange` 一律隐藏。松手（`mouseup`，或窗口失焦）后才评估选区。宿主浮条在则并入；不在则等 400ms 再用自绘浮条兜底。按在 Fork 按钮或宿主浮条上不算拖拽，所以点 Copy、点 Fork 不受影响。
+- 依据：宿主 2.3.0 的浮条状态机在 `pointerup` 后再等 150ms 才量选区并挂浮条（`.research/app/out/renderer/assets/route-CFe3GUyJ.js`，`BO()` 与 `settle.schedule` 的 `setTimeout(…,150)`）。旧的 250ms 兜底离这个时间太近，所以改成 400ms。
+
+**缺陷二：面板空白。**
+- 原因：面板首帧读 `permissions().length`。宿主的 `data.session.permission.list(id)` 在 `permission.sync` 完成之前返回 `undefined`，虽然类型声明是数组。所以抛出 `TypeError: Cannot read properties of undefined (reading 'length')`，整个 Panel 渲染中断。
+- 证据：桌面端 2.3.0 包内的实现是 `permission:{list(e){return c.session.permission[e]}`，没有兜底；同一文件里 `message.list` 是 `…message[e]??[]`，`status` 是 `…active[e]??"idle"`，这两个都有兜底（`.research/app/out/renderer/assets/main-CEQaLS28.js`；npm 包 `@opencode/client` 的 `dist/chunks/contract-tztyfz1b.js` 第 1636 行也一样）。`messages()`、`info()`、`running()` 都不会返回 undefined，只有这一个源有问题。
+- 修法：`permissions()` 在数据源处给出明确初值 `[]`，并注明宿主的这个行为。另外补了两种文案：消息首次同步完成之前显示「加载中…」；同步完成后仍然没有消息，显示空态「这个分叉还没有消息，可以在下方输入。」。旧版在没有消息时会一直显示「加载中…」。
+
+### 验收结果
+
+| # | 验收项 | 结果 |
+|---|---|---|
+| 1 | 按住鼠标拖选的全过程中 Fork 不出现 | **待用户重启后点验** |
+| 2 | 松开、宿主浮条出现后，Fork 与 Copy 并列出现 | **待用户重启后点验** |
+| 3 | 点 Fork，面板完整：标题行、消息列表、输入框 | **待用户重启后点验** |
+| 4 | 面板消息与标签页里一致 | **待用户重启后点验** |
+| 5 | 面板发送一句，回复流式输出，按钮状态变化 | **待用户重启后点验** |
+| 6 | 无消息的分叉显示空态，不白屏 | **待用户重启后点验** |
+| 7 | 重启后上述全部仍成立 | **待用户重启后点验** |
+| 8 | `renderer.log` 不再有 `opencode-session-fork` 的 error | **待用户重启后点验** |
+| 9 | 构建与类型检查通过 | **已通过**（输出见下） |
+
+已经验证的（不需要桌面端）：
+
+```
+$ npx tsc --noEmit     → rc=0，无输出
+$ npm test             → tests 5, pass 5, fail 0
+$ npm run build        → dist/gui-experimental.cjs  14.42 kB │ gzip: 5.27 kB  ✓ built
+```
+
+- 服务端已经在下发新 bundle：`opencode api plugin.gui --param id=opencode-session-fork` 返回 code 14197 字符、revision `bbf7fab7…`，内容里有 `panel.empty` 和 `mouseup`。桌面端重启后加载的就是这一版。
+- 缺陷二用到的分叉会话 `ses_e0bc5c9aeffeZOYGQAjvZcCn3j` 消息结构正常：`GET /api/session/<id>/message` 返回 6 条（assistant ×4、system、user）。assistant 的 `content` 都是数组，tool 的 `state.status` 都有值，面板的消息渲染不会再读到 undefined。
+
+### 待用户重启后点验（每条：怎么操作 → 看什么）
+
+先完全退出桌面端（⌘Q），再重新打开。
+
+1. **拖拽中不出现。** 在任意助手回答里按住左键慢慢拖选，停在中途别松手，停一两秒 → 整个过程中 Fork 不出现，自绘小浮条也不出现。
+2. **松手后并列出现。** 接着松开 → 宿主浮条（Copy 等）出现，Fork 在同一条浮条里紧挨着出现，没有先单独闪一下再并入。点 Copy 仍然能复制。
+3. **面板完整。** 点 Fork → 右侧开出 Fork 标签，顶部有标题行（`Fork · <原标题>`、「在标签页打开」、×），中间是消息列表，底部是输入框，输入框里是所选文字。
+4. **消息一致。** 点「在标签页打开」→ 标签页里的历史和面板消息逐条对应（面板是简化视图，工具只显示一行摘要，宿主自动加的 fork-notice 不显示）。这一步同时验证「在标签页打开」能用。
+5. **发送与流式。** 回到面板，改一句短问题按 Enter → 发送按钮先转圈，然后变成「停止」，同时出现「生成中…」，回复逐步长出来；生成结束后按钮变回「发送」。
+6. **空态。** 用 Fork 按钮建的分叉至少带着所选那条回答，界面上造不出零消息的分叉，所以用「分叉会话已不在」来触发同一条空态路径：先点一次 Fork，然后在左侧会话列表里删掉这个分叉会话，保留右侧的 Fork 标签，再 ⌘Q 重开 → 恢复出来的 Fork 标签先短暂显示「加载中…」，然后显示「这个分叉还没有消息，可以在下方输入。」，标题行和输入框都在，不白屏。另外，在第 3 步打开面板的瞬间，应该只闪一下「加载中…」，之后就是消息，不会白屏。
+7. **重启后仍成立。** 再 ⌘Q 重开一次 → Fork 标签恢复，面板内容完整，1–6 条抽查仍成立。
+8. **日志干净。** 在最新的日志目录里执行
+   `grep -n "opencode-session-fork" ~/Library/Application\ Support/ai.opencode.desktop/logs/<时间目录>/renderer.log`
+   → 没有 `[error]` 行。
+
+证据位置：
+- 桌面端日志：`~/Library/Application Support/ai.opencode.desktop/logs/<时间目录>/renderer.log`。修复前的报错在 `logs/20261119T143152/renderer.log` 第 1 行：`[2026-11-19 08:33:38.152] [error] [plugin] opencode-session-fork TypeError: Cannot read properties of undefined (reading 'length')`。
+- 修复前的空白面板截图（用户提供）：`~/.openclaw/workspace/media/inbound/openclaw-staged-fc9a7dfc-18fe-4eb2-b311-9728bd3ce351/input-0b38bc9b-6b54-4a50-beb9-3a184597b9bd.jpg`。
+- 点验后如果还有问题，把对应时间目录的 `renderer.log` 和截图路径给我，我从那里定位。
+
+---
+
+## 第一轮：初次交付（2026-11-19，任务书 `BRIEF_fork.md`）
+
+> 下面是首轮记录。其中界面层的「未真机验证」各项，已由上面第二轮的点验清单统一接管。
 
 环境：OpenCode Desktop 2.3.0（服务端 `opencode-cli 2.3.0 serve --service`），插件 SDK `@opencode/plugin@2.3.0`，macOS，Node 26.7。
 

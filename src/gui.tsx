@@ -28,6 +28,7 @@ export default Plugin.define({
       "panel.send": "Send",
       "panel.permission": "This fork is waiting for a permission. Open it in a tab to answer.",
       "panel.loading": "Loading…",
+      "panel.empty": "No messages in this fork yet. Send one below.",
       "panel.reasoning": "Thinking",
       "panel.tool": "Tool",
       "panel.shell": "Shell",
@@ -43,6 +44,7 @@ export default Plugin.define({
       "panel.send": "发送",
       "panel.permission": "分叉会话在等待授权，请在标签页中打开处理。",
       "panel.loading": "加载中…",
+      "panel.empty": "这个分叉还没有消息，可以在下方输入。",
       "panel.reasoning": "思考",
       "panel.tool": "工具",
       "panel.shell": "命令",
@@ -193,10 +195,14 @@ export default Plugin.define({
       floating.style.left = `${left}px`
     }
 
-    // The host shows its toolbar once the selection settles; give it that long before the floating bar steps in.
+    // The host shows its toolbar 150ms after the selection settles, then measures it; give it well over that before
+    // the floating bar steps in.
     let settle: ReturnType<typeof setTimeout> | undefined
+    // A selection being dragged is not settled yet: nothing shows until the button comes up.
+    let dragging = false
     const refresh = () => {
       clearTimeout(settle)
+      if (dragging) return hide()
       const next = candidate()
       if (!next) return hide()
       current = next
@@ -205,12 +211,33 @@ export default Plugin.define({
         current = candidate() ?? undefined
         if (current) place()
         else hide()
-      }, 250)
+      }, 400)
     }
     document.addEventListener("selectionchange", refresh)
+    // Presses on our button or the host toolbar keep the selection, so they do not start a drag.
+    const onPress = (event: MouseEvent) => {
+      if (event.button !== 0) return
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest(`[${OWN}], ${HOST_TOOLBAR}`)) return
+      dragging = true
+      clearTimeout(settle)
+      hide()
+    }
+    const onRelease = () => {
+      if (!dragging) return
+      dragging = false
+      refresh()
+    }
+    document.addEventListener("mousedown", onPress, true)
+    window.addEventListener("mouseup", onRelease, true)
+    // A release outside the window never arrives; leaving the window ends the drag instead.
+    window.addEventListener("blur", onRelease)
     onCleanup(() => {
       clearTimeout(settle)
       document.removeEventListener("selectionchange", refresh)
+      document.removeEventListener("mousedown", onPress, true)
+      window.removeEventListener("mouseup", onRelease, true)
+      window.removeEventListener("blur", onRelease)
     })
 
     // The host toolbar mounts and unmounts as the selection changes; join it whenever it appears.
@@ -246,10 +273,15 @@ export default Plugin.define({
       const data = () => server().data
       const [text, setText] = draft(forkID())
       const [sending, setSending] = createSignal(false)
+      // Tells "still loading" from "the fork has no messages" once the first message sync settles.
+      const [loaded, setLoaded] = createSignal(false)
 
       onMount(() => {
         void data().session.sync(forkID()).catch(() => {})
-        void data().session.message.sync(forkID()).catch(() => {})
+        void data()
+          .session.message.sync(forkID())
+          .catch(() => {})
+          .finally(() => setLoaded(true))
         void data().session.permission.sync(forkID()).catch(() => {})
       })
 
@@ -261,7 +293,8 @@ export default Plugin.define({
         ),
       )
       const running = () => data().session.status(forkID()) === "running"
-      const permissions = () => data().session.permission.list(forkID())
+      // The host (2.3.0) returns undefined here until permission.sync lands, although its type says an array.
+      const permissions = () => data().session.permission.list(forkID()) ?? []
 
       const openTab = () => ctx.tabs.open({ server: server().id, id: forkID() }, { focus: true })
       const close = () => ctx.layout.close(`${ctx.id}:${props.tab.id}`, props.session)
@@ -296,7 +329,10 @@ export default Plugin.define({
             <ctx.ui.IconButton icon="close-small" label={ctx.t("panel.close")} onClick={close} />
           </div>
           <div class="session-fork-messages" ref={(element) => (list = element)}>
-            <Show when={messages().length > 0} fallback={<div class="session-fork-muted">{ctx.t("panel.loading")}</div>}>
+            <Show
+              when={messages().length > 0}
+              fallback={<div class="session-fork-muted">{ctx.t(loaded() ? "panel.empty" : "panel.loading")}</div>}
+            >
               <For each={messages()}>{(message) => <Message message={message} onRender={follow} />}</For>
             </Show>
             <Show when={running()}>
