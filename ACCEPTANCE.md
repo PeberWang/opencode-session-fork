@@ -194,3 +194,34 @@ bundle 外部依赖只有 @opencode/plugin/gui、solid-js、solid-js/web（都�
 5. 用 `opencode api get /api/session/<原会话id>/message` 核对条数：分叉前后应该一致。
 6. 重启 OpenCode，分叉标签应该还在，Fork 按钮仍然可用。
 7. 触发一次需要授权的操作，确认 permission-notify 的右上角浮窗照常弹出。在 openclaw-inbox 的「案头」打开一个 🦞 任务，确认照常工作。
+
+
+## 第四轮真机验收（2026-11-21 22:25，用户确认）
+
+用户在设计会话仍在运行、**没有重启桌面端**的情况下直接试用，确认三处改动都已生效并且满意：
+
+- 输入框压到一行，选中文字不再进输入框。
+- 选中文字以引用卡片出现在输入框上方。
+- 历史里的执行链折成一行、点击展开。
+
+结论：本插件记为结案。**实测支持热插**——`npm run build` 之后不需要重启桌面端，界面即加载新 bundle，此前 HANDOFF 里「生效需要重启桌面端」的说法对 GUI 部分不成立，后续改版可以省掉这一步（若改到主进程或面板注册表，仍需重启）。
+
+遗留观察项：`renderer.log` 在 22:07 有一条 `Uncaught RangeError: Maximum call stack size exceeded`，时间接近面板操作，但无法确认归属。若复现再查，不影响本次结案。
+
+---
+
+## 第五轮真机验收（写回）（2026-11-23，任务书 `BRIEF_FORK_WRITEBACK.md`）
+
+背景：关闭 Fork 时受控写回。实现口径先记一笔，点验时对照——确认弹窗在摘要生成**之后**出现（生成失败就不弹、直接跳过）；写入的是 `session.synthetic({resume:false})`，不触发模型；写回行在宿主时间线里显示为「来自 Fork · <标题>」，点击展开三段详情和「回到 Fork」。
+
+准备：重启桌面端（第四轮实测热插有效，可先只关窗口重开；保险起见 ⌘Q 完全重启）。记下 `~/Library/Application Support/ai.opencode.desktop/logs/` 下最新的时间目录，每步之后查它的 `renderer.log`。
+
+| # | 操作 | 判断标准 | 结论 |
+|---|---|---|---|
+| 1 | 找一个会话，划选一条助手回答 Fork 出来，在 Fork 里让它**改一个文件**（例如「把 src/a.ts 的 X 改成 Y」），等它改完，关掉 Fork 标签 | 弹出「并入主线？」确认框；选「并入」后，左侧原会话时间线里出现一行「来自 Fork · <标题>」（时间线是折叠档位时可能折在一条 group 里，点开 group 可见）。点这一行，展开出三段：**结论**（两三句）、**改动**（文件路径 + 一句说明）、**还悬着**，合计不超过 300 字；行尾有「回到 Fork」按钮，点了能重新打开这个 Fork 的面板。原会话没有开始生成、没有产生任何模型回复 | |
+| 2 | 紧接着点「回到 Fork」再把这个 Fork 关一次；重启桌面端后再打开这个 Fork 关一次 | 不再弹确认框，原会话没有第二条写回；`renderer.log` 里各有一行 `[session-fork] writeback skipped (<forkID>): already written` | |
+| 3 | 重新 Fork 一个会话，在 Fork 里改一个文件（或发新消息），关闭，弹窗时选「不并入」；然后原样再关一次 | 选否后原会话没有任何新增（可用 `opencode api session.message.list --param sessionID=<原会话ID>` 对比条数）；再关一次不再弹窗。此后在 Fork 里**再发一条新消息**，关闭时才会再次询问 | |
+| 4 | Fork 一个会话，在 Fork 里只问一个问题（例如「这段是什么意思」），等回答，不改任何文件，关闭 | 不弹确认框，原会话没有任何新增，`renderer.log` 有一行 `writeback skipped (<forkID>): no changes and no conclusion`（或 `nothing happened in the fork`） | |
+| 5 | 断开网络（关 Wi-Fi），关闭一个改动过文件的 Fork | 关闭动作立即完成、无卡顿、不弹窗（摘要生成失败即跳过）；`renderer.log` 有一行 `[session-fork] writeback skipped (<forkID>): summary failed: …`；恢复网络后一切正常 | |
+
+结论：________

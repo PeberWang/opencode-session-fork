@@ -41,6 +41,8 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  min-width: 0;
+  container: session-fork / inline-size;
   color: var(--v2-text-text-base, CanvasText);
 }
 
@@ -74,9 +76,19 @@
 
 .session-fork-user {
   align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   max-width: 90%;
+  min-width: 0;
+}
+
+.session-fork-user-text {
   padding: 8px 10px;
   border-radius: 10px;
+  font-size: 13px;
+  line-height: 20px;
   white-space: pre-wrap;
   word-break: break-word;
   background: var(--v2-background-bg-layer-02, color-mix(in srgb, CanvasText 8%, transparent));
@@ -85,18 +97,12 @@
 .session-fork-assistant {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   min-width: 0;
 }
 
-.session-fork-reasoning > summary,
 .session-fork-muted {
   font-size: 12px;
   color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 55%, transparent));
-}
-
-.session-fork-reasoning > summary {
-  cursor: pointer;
 }
 
 .session-fork-permission {
@@ -114,32 +120,628 @@
   flex: 1;
 }
 
+
+/* ---- Composer: one line until the text needs more, at most six, then it scrolls ---------------------------------- */
+
 .session-fork-composer {
-  padding: 8px 12px 12px;
-  border-top: 1px solid var(--v2-border-border-base, color-mix(in srgb, CanvasText 12%, transparent));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 12px 10px;
 }
 
-.session-fork-composer textarea {
-  box-sizing: border-box;
-  width: 100%;
-  resize: vertical;
-  min-height: 72px;
-  padding: 8px;
+.session-fork-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 3px 0 10px;
   border-radius: 8px;
-  border: 1px solid var(--v2-border-border-base, color-mix(in srgb, CanvasText 15%, transparent));
+  border: 0.5px solid var(--v2-border-border-base, color-mix(in srgb, CanvasText 14%, transparent));
   background: var(--v2-background-bg-layer-01, Canvas);
+  transition: border-color 0.15s;
+}
+
+.session-fork-input:focus-within {
+  border-color: var(--v2-border-border-strong, color-mix(in srgb, CanvasText 28%, transparent));
+}
+
+/* 20px lines and 5px above and below: 30px for one line, matching `fit` in gui.tsx. */
+.session-fork-input textarea {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 5px 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow-y: hidden;
+  background: transparent;
   color: inherit;
   font: inherit;
   font-size: 13px;
+  line-height: 20px;
 }
 
-.session-fork-composer textarea:focus {
-  outline: 2px solid var(--v2-border-border-focus, Highlight);
+.session-fork-send {
+  flex-shrink: 0;
+  margin-bottom: 3px;
+}
+
+/* ---- Quote: the selection a fork starts from, above the input, and in a sent message ------------------------------ */
+
+.session-fork-quote {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--v2-border-border-base, color-mix(in srgb, CanvasText 18%, transparent));
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--v2-text-text-base, CanvasText) 4%, transparent);
+}
+
+.session-fork-quote-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px 4px 0;
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+  font-size: 12px;
+  line-height: 18px;
+  text-align: start;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: pointer;
+  user-select: text;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.session-fork-quote[data-expanded] .session-fork-quote-text {
+  display: block;
+  max-height: 216px;
+  overflow-y: auto;
+}
+
+.session-fork-quote-text:focus-visible {
+  outline: 1px solid var(--v2-text-text-accent, Highlight);
   outline-offset: -1px;
 }
 
-.session-fork-actions {
+.session-fork-quote-remove {
+  flex-shrink: 0;
+  margin: 1px 1px 0 0;
+}
+
+/* In a sent message the quote sits above the text, as wide as the bubble allows. */
+.session-fork-user .session-fork-quote {
+  align-self: stretch;
+}
+
+/* ---- Timeline rows, measured from the host's timeline (main-*.css: tool-collapsible, tool-trigger, compact) ------- */
+
+.session-fork-tool {
   display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* One 28px line: the host's compact trigger (16px compact line height plus 12px). */
+.session-fork-tool-trigger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--v2-text-text-base, CanvasText);
+  font: inherit;
+  text-align: start;
+  cursor: default;
+  user-select: none;
+}
+
+.session-fork-tool-trigger:focus-visible {
+  outline: none;
+}
+
+.session-fork-tool-trigger:focus-visible > .session-fork-tool-info {
+  border-radius: 4px;
+  background: var(--v2-background-bg-layer-02, color-mix(in srgb, CanvasText 8%, transparent));
+  box-shadow: 0 0 0 4px var(--v2-background-bg-layer-02, color-mix(in srgb, CanvasText 8%, transparent));
+}
+
+.session-fork-tool-info {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 16px;
+  letter-spacing: -0.04px;
+}
+
+.session-fork-tool-title {
+  flex-shrink: 0;
+  font-family: var(--v2-font-family-sans, inherit);
+  font-weight: 530;
+  color: var(--v2-text-text-base, CanvasText);
+  white-space: nowrap;
+}
+
+/* A tool the host has no name for shows its own, which can be long: it gives way, with an ellipsis. */
+.session-fork-tool-title[data-shrink] {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-fork-tool-title[data-muted] {
+  font-weight: 440;
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+}
+
+/* The host's TextShimmer: a light band sweeps the title while the call runs. */
+.session-fork-tool-title[data-pending] {
+  color: transparent;
+  background: linear-gradient(
+      90deg,
+      var(--v2-text-text-faint, color-mix(in srgb, CanvasText 40%, transparent)) 0%,
+      var(--v2-text-text-base, CanvasText) 50%,
+      var(--v2-text-text-faint, color-mix(in srgb, CanvasText 40%, transparent)) 100%
+    )
+    0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: session-fork-shimmer 1.2s linear infinite;
+}
+
+@keyframes session-fork-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-fork-tool-title[data-pending] {
+    animation: none;
+    color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+    background: none;
+  }
+}
+
+.session-fork-tool-subtitle {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--v2-font-family-sans, inherit);
+  font-weight: 440;
+  font-variant-numeric: tabular-nums;
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+}
+
+.session-fork-tool-subtitle[data-mono] {
+  font-family: var(--v2-font-family-code, ui-monospace, monospace);
+}
+
+.session-fork-tool-outcome {
+  flex-shrink: 0;
+  font-weight: 440;
+  white-space: nowrap;
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+}
+
+.session-fork-tool-outcome[data-tone="danger"] {
+  color: var(--v2-state-fg-danger, #d92d20);
+}
+
+.session-fork-tool-changes {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 440;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-fork-tool-changes [data-kind="add"] {
+  color: var(--v2-state-fg-success, #12a150);
+}
+
+.session-fork-tool-changes [data-kind="del"] {
+  color: var(--v2-state-fg-danger, #d92d20);
+}
+
+/* The arrow shows on hover and while open, pointing right when closed: the host's Collapsible.Arrow. */
+.session-fork-tool-arrow {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--v2-icon-icon-faint, color-mix(in srgb, CanvasText 40%, transparent));
+  opacity: 0;
+  transform: rotate(-90deg);
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+
+.session-fork-tool-trigger:hover > .session-fork-tool-arrow,
+.session-fork-tool-trigger:focus-visible > .session-fork-tool-arrow,
+.session-fork-tool[data-open] > .session-fork-tool-trigger > .session-fork-tool-arrow {
+  opacity: 1;
+}
+
+.session-fork-tool[data-open] > .session-fork-tool-trigger > .session-fork-tool-arrow {
+  transform: rotate(0deg);
+}
+
+/* Opening and closing slide the height, as the host's slideDown/slideUp do. */
+.session-fork-tool-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.session-fork-tool[data-open] > .session-fork-tool-content {
+  grid-template-rows: 1fr;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-fork-tool-content {
+    transition: none;
+  }
+}
+
+/* The grid track clips this box; it holds no padding of its own, so its height goes to zero cleanly. */
+.session-fork-tool-body {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The padding and gaps stay whether the row is open or not, so opening slides instead of jumping. */
+.session-fork-tool-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-block: 4px 8px;
+}
+
+/* Boxes keep their own height while the track animates, so they are clipped rather than squashed. */
+.session-fork-tool-inner > *,
+.session-fork-tool-section > *,
+.session-fork-tool-file > * {
+  flex-shrink: 0;
+}
+
+/* The rail: content indented 14px past a hairline at 2px, the timeline's nested rail. */
+.session-fork-tool:not([data-rail="false"]) > .session-fork-tool-content > .session-fork-tool-body > .session-fork-tool-inner {
+  padding-inline-start: 14px;
+}
+
+.session-fork-tool:not([data-rail="false"]) > .session-fork-tool-content > .session-fork-tool-body > .session-fork-tool-inner::before {
+  content: "";
+  position: absolute;
+  inset-block: 4px;
+  inset-inline-start: 2px;
+  width: 1px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--v2-border-border-base, color-mix(in srgb, CanvasText 14%, transparent)) 50%, transparent);
+}
+
+.session-fork-tool:not([data-rail="false"]) > .session-fork-tool-content > .session-fork-tool-body > .session-fork-tool-inner:hover::before {
+  background: var(--v2-border-border-base, color-mix(in srgb, CanvasText 14%, transparent));
+}
+
+.session-fork-tool-trigger[data-static] {
+  pointer-events: none;
+}
+
+.session-fork-tool-section,
+.session-fork-tool-file {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.session-fork-tool-caption {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--v2-text-text-faint, color-mix(in srgb, CanvasText 45%, transparent));
+}
+
+.session-fork-tool-error {
+  font-size: 13px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--v2-state-fg-danger, #d92d20);
+  user-select: text;
+}
+
+.session-fork-code {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 12px;
+}
+
+.session-fork-codebox {
+  --session-fork-section: var(--v2-background-bg-base, Canvas);
+  min-width: 0;
+}
+
+/* A command the user ran: the console box, with how it ended under its corner. */
+.session-fork-shell-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.session-fork-shell-card > .session-fork-console {
+  align-self: stretch;
+}
+
+/* A group's label: the verb muted, what it did in the text color, the rest after a dot. */
+.session-fork-group-detail {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 440;
+  color: var(--v2-text-text-base, CanvasText);
+}
+
+.session-fork-group-detail:last-child {
+  flex-shrink: 2;
+}
+
+.session-fork-group-separator {
+  flex-shrink: 0;
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+}
+
+.session-fork-group-list,
+.session-fork-thoughts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Rows inside a group read lighter, as the host's grouped items do. */
+.session-fork-group-list .session-fork-tool-title {
+  font-weight: 440;
+}
+
+.session-fork-thought-text {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+  user-select: text;
+}
+
+/* ---- A command and its output: the host's console box (bash-output, variant shell) ------------------------------- */
+
+.session-fork-console {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 0.5px solid var(--v2-border-border-base, color-mix(in srgb, CanvasText 14%, transparent));
+  background: var(--v2-background-bg-base, Canvas);
+  user-select: text;
+}
+
+.session-fork-console pre {
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.session-fork-console code {
+  display: block;
+  font-family: var(--v2-font-family-code, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 440;
+  line-height: 18px;
+  letter-spacing: -0.04px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.session-fork-console-command {
+  color: var(--v2-text-text-base, CanvasText);
+}
+
+.session-fork-console .session-fork-clamp {
+  --session-fork-section: var(--v2-background-bg-layer-01, color-mix(in srgb, CanvasText 4%, Canvas));
+  background: var(--session-fork-section);
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+}
+
+.session-fork-console-command + .session-fork-clamp {
+  border-top: 0.5px solid var(--v2-border-border-base, color-mix(in srgb, CanvasText 14%, transparent));
+}
+
+.session-fork-console-result[data-error] {
+  color: var(--v2-state-fg-danger, #d92d20);
+}
+
+/* Output past the host's 240px box is cut, fading out, with a toggle for the rest. */
+.session-fork-clamp-frame {
+  position: relative;
+  max-height: 240px;
+  overflow: hidden;
+}
+
+.session-fork-clamp[data-expanded] .session-fork-clamp-frame {
+  max-height: none;
+}
+
+/* Cut from the top instead, so the last lines stay in view. */
+.session-fork-clamp-frame[data-tail] {
+  display: flex;
+  flex-direction: column;
   justify-content: flex-end;
-  margin-top: 6px;
+}
+
+.session-fork-clamp-frame[data-tail] > * {
+  flex-shrink: 0;
+}
+
+.session-fork-clamp-frame[data-tail][data-overflow]::after {
+  top: 0;
+  bottom: auto;
+  background: linear-gradient(var(--session-fork-section, Canvas), transparent);
+}
+
+.session-fork-clamp-frame[data-overflow]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 28px;
+  pointer-events: none;
+  background: linear-gradient(transparent, var(--session-fork-section, Canvas));
+}
+
+.session-fork-clamp-toggle {
+  display: block;
+  width: 100%;
+  padding: 4px 12px 6px;
+  border: 0;
+  background: none;
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.session-fork-clamp-toggle:hover {
+  color: var(--v2-text-text-base, CanvasText);
+}
+
+/* ---- Narrow panels: tighter margins, so rows keep their room ------------------------------------------------------ */
+
+@container session-fork (max-width: 360px) {
+  .session-fork-messages {
+    padding: 10px 8px;
+  }
+
+  .session-fork-composer {
+    padding: 6px 8px 8px;
+  }
+
+  .session-fork-user {
+    max-width: 100%;
+  }
+}
+
+/* ---- Write-back notices in the host timeline: the host's one-line notice opens in place ---------------------------- */
+
+[data-session-fork-writeback] {
+  cursor: pointer;
+}
+
+[data-session-fork-writeback]:hover {
+  color: var(--v2-text-text-base, CanvasText);
+}
+
+[data-session-fork-writeback]:focus-visible {
+  outline: 1px solid var(--v2-text-text-accent, Highlight);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* The host's caret, drawn as a border: right when closed, down when open. */
+[data-session-fork-writeback]::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-inline-start: 7px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  vertical-align: 2px;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  opacity: 0.7;
+}
+
+[data-session-fork-writeback][aria-expanded="true"]::after {
+  transform: rotate(45deg);
+  vertical-align: 3px;
+}
+
+.session-fork-writeback {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.session-fork-writeback[data-open] {
+  grid-template-rows: 1fr;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-fork-writeback,
+  [data-session-fork-writeback]::after {
+    transition: none;
+  }
+}
+
+.session-fork-writeback-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.session-fork-writeback-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 4px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid color-mix(in srgb, var(--v2-text-text-base, CanvasText) 12%, transparent);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--v2-text-text-muted, color-mix(in srgb, CanvasText 60%, transparent));
+}
+
+.session-fork-writeback-heading {
+  font-weight: 530;
+  color: var(--v2-text-text-base, CanvasText);
+}
+
+.session-fork-writeback-item {
+  font-weight: 440;
+  overflow-wrap: anywhere;
+}
+
+.session-fork-writeback-actions {
+  display: flex;
+  margin-inline-start: -8px;
 }

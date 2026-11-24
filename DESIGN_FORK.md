@@ -5,7 +5,7 @@
 - Fork 按钮通过 DOM 层注入。宿主没有选区菜单的注册点，只能依赖几个渲染层 DOM 属性，失效时会悄悄不出现，不会把宿主弄坏。
 - 并排显示用官方的侧栏 Panel，在右侧自己画一个分叉会话视图。宿主没有把两个会话同屏并列的 API。
 
-数据层（fork、改标题、写入用户消息但不跑模型）全部走官方 client API。
+数据层（fork、改标题、把选中文字作为引用随消息发出但不跑模型）全部走官方 client API；第五轮关闭时的写回另走 `session.synthetic` 与 `experimental.generate.text`（见 README）。
 
 推荐方案 A（见第 4 节）。
 
@@ -99,9 +99,9 @@
 ### 3.1 侧栏 Panel 挂一个自绘的分叉会话视图（全部用官方 API）
 
 - `ctx.add(Panel, { region: "side", … })`。Fork 完成后调用 `ctx.layout.open("<plugin>:fork-<forkID>", 原会话)`，标签挂在**原会话**的侧栏标签条上。左边是宿主的原会话（输入框照常可用），右边是分叉。
-- 消息流：`server.data.session.message.list(forkID)` 和 `status(forkID)` 是响应式的，流式输出自动刷新。文本用 `ctx.ui.Markdown` 渲染，它和时间线是同一套渲染器，支持数学公式和代码块。推理与工具调用只显示折叠的一行摘要。
-- 输入框：自己画一个 textarea。Fork 完成后聚焦这里。发送走 `data.session.prompt({sessionID: forkID, text})`。另有「停止」（`session.interrupt`）和「在标签页打开」（`ctx.tabs.open({…}, {focus: true})`，切到宿主的完整界面）。
-- 关闭：关掉侧栏标签即可，原会话不受影响。分叉会话留在服务端，会话列表里能找到，**不自动删除**。
+- 消息流：`server.data.session.message.list(forkID)` 和 `status(forkID)` 是响应式的，流式输出自动刷新。文本用 `ctx.ui.Markdown` 渲染，它和时间线是同一套渲染器，支持数学公式和代码块。推理与工具调用按宿主的 compact 形态折成一行分组（`src/timeline.tsx`，第四轮补上展开详情），见 HANDOFF「执行链按宿主原版重画」。
+- 输入框：自己画一个单行可增长的 textarea（第四轮定稿，默认一行、最多 6 行）。Fork 完成后聚焦这里；所选文字以引用卡片显示在输入框上方，点 × 可移除。发送走 `data.session.prompt({sessionID: forkID, text, metadata})`，引用按宿主 composer 的 `QuoteComment` 写成正文前缀加 metadata 两份（第四轮）。另有「停止」（`session.interrupt`）和「在标签页打开」（`ctx.tabs.open({…}, {focus: true})`，切到宿主的完整界面）。
+- 关闭：关掉侧栏标签即可，分叉会话留在服务端，会话列表里能找到，**不自动删除**。原会话在分叉期间不受影响；关闭时按「受控写回」口径（`BRIEF_FORK_WRITEBACK.md`）经用户确认后写回一条摘要，见 README「Write-back」。
 - 重启：Panel 不设 `transient`，宿主会还原标签，`list()` 按存下来的 id 把标签恢复出来。
 - **体验代价**：右边是简化视图。没有宿主的工具卡片、diff、模型或 agent 选择器、附件、斜杠命令。出现权限请求时只提示「去标签页处理」（permission-notify 照常弹通知）。侧栏宽度由宿主管理，用户可以拖动，插件用 `Panel.width` 给一个初始宽度，约窗口的一半。
 
@@ -138,9 +138,9 @@
 1. **定位**：从选区起点取 `data-timeline-part-id`，得到助手消息 ID `M`，会话 ID 取 `ctx.sessions.current()`。选区落在我们自己的 Fork 面板里时不响应，不做多级分叉。
 2. **截断点**：`client.session.fork({sessionID, before})` 的语义是「复制 `before` 这条消息**之前**的投影历史；不传 `before` 就复制全部」（服务端路由描述原文：*Create a child session by copying projected history before a message. Omit before to copy the full history.*）。所以 `before` 取原会话里排在 `M` 之后的第一条消息的 ID；`M` 是最后一条时不传。这一步需要真机核实 `before` 指向 idle 之类非对话记录时的行为（见第 6 节），选区所在的那条消息要完整保留。
 3. **标题**：`client.session.update({sessionID: fork, title: "Fork · " + 原标题前 20 字})`。要在写入用户消息**之前**设好，避免宿主或服务端按首条消息自动生成标题，那也是一次模型调用。
-4. **所选文字作为草稿（2026-11-19 定稿，取代原来的 `prompt({resume:false})` 方案）**：真机核实发现 `resume:false` 写入的用户消息停在 inbox 里排队，不进 `/message`（见第 6 节）。所以改为把选中文字（只去掉首尾空行）**直接作为正文**放进 Fork 面板输入框的草稿，不加 `> ` 引用。不调用任何写消息的接口，用户确认或修改后自己按发送。也不用 `experimental.session.export/import`：稳定性优先。
+4. **所选文字作为草稿（2026-11-19 定稿，取代原来的 `prompt({resume:false})` 方案；2026-11-21 第四轮改为输入框上方的引用卡片）**：真机核实发现 `resume:false` 写入的用户消息停在 inbox 里排队，不进 `/message`（见第 6 节）。所以最初改为把选中文字（只去掉首尾空行）直接作为正文放进 Fork 面板输入框的草稿，不调用任何写消息的接口。第四轮起改为引用卡片：输入框留空，选中文字作为宿主同款 quote 随用户自己的消息发出（正文前缀 + `QuoteComment` metadata 两份，见 HANDOFF）。两种做法都不在 Fork 时写用户消息；导出导入的 experimental 接口为了稳定性没采用。
 5. **不跑模型**：Fork 流程只有 `message.list`（读）、`session.get`（读）、`session.fork`、`session.update`（只改分叉会话的标题）四个调用。整个插件里唯一的 `prompt` 调用在面板的「发送」按钮里。
-6. **原会话零副作用**：只做读操作和对原会话的 `fork` 调用，不对原会话做任何写操作。阶段二会核对原会话分叉前后的消息数、内容哈希、标题和 `time.updated`。
+6. **原会话零副作用（Fork 期间）**：Fork 流程只做读操作和对原会话的 `fork` 调用，不对原会话做任何写操作。阶段二会核对原会话分叉前后的消息数、内容哈希、标题和 `time.updated`。（第五轮起增加「关闭时受控写回」：只在关闭 Fork、经用户确认后，才向原会话写一条摘要，见 README「Write-back」；Fork 期间口径不变。）
 
 ## 6. 真机核实结果（2026-11-19，测试会话已全部删除）
 
