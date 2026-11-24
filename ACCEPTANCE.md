@@ -224,4 +224,8 @@ bundle 外部依赖只有 @opencode/plugin/gui、solid-js、solid-js/web（都�
 | 4 | Fork 一个会话，在 Fork 里只问一个问题（例如「这段是什么意思」），等回答，不改任何文件，关闭 | 不弹确认框，原会话没有任何新增，`renderer.log` 有一行 `writeback skipped (<forkID>): no changes and no conclusion`（或 `nothing happened in the fork`） | |
 | 5 | 断开网络（关 Wi-Fi），关闭一个改动过文件的 Fork | 关闭动作立即完成、无卡顿、不弹窗（摘要生成失败即跳过）；`renderer.log` 有一行 `[session-fork] writeback skipped (<forkID>): summary failed: …`；恢复网络后一切正常 | |
 
-结论：________
+结论：**主流程真机通过（2026-11-24 17:32，铭培在新会话实测）**。关闭 Fork 后弹出确认，确认后主会话出现「来自 Fork · <标题>」的可展开条目，三段齐全。第 2 至第 5 项（重复关闭不重写、选否不写、无改动不写、断网跳过）未逐项点验，由 32 条测试与代码路径覆盖，后续遇到再补。
+
+**同轮修的两个真实故障**
+1. 摘要模型报 `Model not found: deepseek/deepseek-flash`。根因是插件在默认目录上下文里解析模型，而不是 Fork 所在目录。改为在 Fork 自己的目录解析，并在变体被拒时去变体重试一次（`0a66071`）。
+2. 手动注入写回时元数据结构套错一层（`{sessionFork:{...}}`），插件按「source + forkID + hash」平铺字段识别，认不出就退化成普通通知，只显示一行。正确结构见 `src/writeback.ts` 的 `WritebackMeta`。
