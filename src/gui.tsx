@@ -772,7 +772,7 @@ export default Plugin.define({
       if (writing.has(forkID)) return
       writing.add(forkID)
       const client = session.server.client
-      const directory = session.location?.directory
+      const directory = session.directory ?? session.location?.directory
       void runWriteback({
         config,
         forkID,
@@ -800,8 +800,25 @@ export default Plugin.define({
             ...messages.flatMap((message) => (message.type === "synthetic" ? [message.metadata] : [])),
           ].some((metadata) => writebackMeta(metadata)?.forkID === forkID)
         },
-        generate: (prompt, signal) =>
-          client.experimental.generate.text({ prompt, model: config.model }, { signal }).then((result) => result.text),
+        generate: (prompt, model, signal) =>
+          client.experimental.generate
+            .text(
+              { prompt, model },
+              // The session's own directory, named on the request: the server resolves the model in the location the
+              // request names, and a request without one boots a location of its own where the model may not exist yet.
+              { signal, ...(directory ? { headers: { "x-opencode-directory": encodeURIComponent(directory) } } : {}) },
+            )
+            .then((result) => result.text)
+            .catch((error) => {
+              // Once per failed attempt, not per run: which model was asked for, and in which directory.
+              const detail =
+                `[session-fork] generate failed: model=${JSON.stringify(model)} dir=${directory ?? "(unknown)"}` +
+                ` ref=${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`
+              console.error(detail)
+              throw error
+            }),
         confirm: (preview) =>
           runWithOwner(root, () =>
             ctx.dialogs.confirm({

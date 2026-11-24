@@ -9,6 +9,8 @@ import {
   forkName,
   formatSummary,
   length,
+  modelAttempts,
+  modelRefused,
   ownMessages,
   parseSummary,
   runWriteback,
@@ -149,6 +151,7 @@ type Fake = {
   writes: { mainID: string; text: string; description: string; metadata: WritebackMeta }[]
   confirms: { title: string; body: string }[]
   prompts: number
+  models: { providerID: string; id: string; variant?: string }[]
   logs: string[]
   answer: boolean
   generate: (signal: AbortSignal) => Promise<string>
@@ -165,6 +168,7 @@ function fake(overrides: Partial<Fake> = {}): Fake {
     writes: [],
     confirms: [],
     prompts: 0,
+    models: [],
     logs: [],
     answer: true,
     generate: async () => SUMMARY,
@@ -187,8 +191,9 @@ function deps(server: Fake, config: Partial<WritebackDeps["config"]> = {}, timer
       messages: server.messages,
     }),
     existing: async () => server.main.some((meta) => meta.forkID === "ses_fork"),
-    generate: (_prompt, signal) => {
+    generate: (_prompt, model, signal) => {
       server.prompts++
+      server.models.push(model)
       return server.generate(signal)
     },
     confirm: async (preview) => {
@@ -309,6 +314,45 @@ test("offline: a summary that fails or times out skips with one log line and nev
   assert.equal(aborted, true)
   assert.equal(hanging.logs.length, 1)
   assert.equal(hanging.confirms.length, 0)
+})
+
+test("a model ref the server refuses costs one retry without its variant, and nothing more", async () => {
+  let calls = 0
+  const server = fake({
+    generate: async () => {
+      calls++
+      if (calls === 1) throw new Error("Model not found: deepseek/deepseek-flash")
+      return SUMMARY
+    },
+  })
+  assert.equal((await runWriteback(deps(server))).status, "written")
+  assert.deepEqual(server.models, [
+    { providerID: "deepseek", id: "deepseek-flash", variant: "none" },
+    { providerID: "deepseek", id: "deepseek-flash" },
+  ])
+  assert.deepEqual(server.logs, [])
+
+  // Refused twice: one log line, and the error the last attempt raised.
+  const twice = fake({ generate: async () => Promise.reject(new Error("Model not found: deepseek/deepseek-flash")) })
+  assert.deepEqual(await runWriteback(deps(twice)), {
+    status: "skipped",
+    reason: "summary failed: Model not found: deepseek/deepseek-flash",
+  })
+  assert.equal(twice.prompts, 2)
+
+  // A failure that says nothing about the reference is not retried.
+  const offline = fake({ generate: async () => Promise.reject(new TypeError("Failed to fetch")) })
+  assert.equal((await runWriteback(deps(offline))).status, "skipped")
+  assert.equal(offline.prompts, 1)
+
+  assert.deepEqual(modelAttempts({ providerID: "x", id: "y" }), [{ providerID: "x", id: "y" }])
+  assert.deepEqual(modelAttempts({ providerID: "x", id: "y", variant: "none" }), [
+    { providerID: "x", id: "y", variant: "none" },
+    { providerID: "x", id: "y" },
+  ])
+  assert.equal(modelRefused(new Error("Model not found: x/y")), true)
+  assert.equal(modelRefused(new Error("Variant unavailable for x/y: none")), true)
+  assert.equal(modelRefused(new Error("Failed to fetch")), false)
 })
 
 test("a failed write, a load that throws, or the switch off: skipped, logged, nothing thrown", async () => {

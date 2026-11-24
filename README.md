@@ -46,7 +46,7 @@ The defaults need no configuration. To change them, give the plugin's entry opti
 ]
 ```
 
-The default model runs without thinking (`#none`): with thinking, a summary of a long fork took over 20 seconds, past any reasonable timeout; without, about two.
+The default model runs without thinking (`#none`): with thinking, a summary of a long fork took over 20 seconds, past any reasonable timeout; without, about two. The request names the fork's own directory, so the server resolves the model in that project rather than in a location it boots on the fly. If the server refuses the model reference (an unknown variant, say), the plugin asks once more without the variant; any other failure is not retried.
 
 ## Install
 

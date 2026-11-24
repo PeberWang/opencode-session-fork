@@ -27,6 +27,17 @@ export const WRITEBACK_DEFAULTS: WritebackConfig = {
   timeoutMs: 5000,
 }
 
+/** The model as configured, then the same one without its variant, which some resolution paths do not know. */
+export function modelAttempts(model: WritebackConfig["model"]): WritebackConfig["model"][] {
+  return model.variant ? [model, { providerID: model.providerID, id: model.id }] : [model]
+}
+
+/** A failure that says the model reference itself, rather than the call, was wrong: worth one retry without a variant. */
+export function modelRefused(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /model not found|model unavailable|variant unavailable|model\.variant/i.test(message)
+}
+
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 const string = (value: unknown) => (typeof value === "string" ? value.trim() : "")
@@ -371,7 +382,7 @@ export type WritebackDeps = {
   /** The main session already holds a write-back of this fork, delivered or still waiting in its inbox. */
   readonly existing: (mainID: string, since: number) => Promise<boolean>
   /** One call to the summary model; rejects on any failure, and is aborted past the timeout. */
-  readonly generate: (prompt: string, signal: AbortSignal) => Promise<string>
+  readonly generate: (prompt: string, model: WritebackConfig["model"], signal: AbortSignal) => Promise<string>
   /** Asks the user, showing what would be merged. */
   readonly confirm: (preview: { title: string; body: string }) => Promise<boolean>
   readonly write: (input: { mainID: string; text: string; description: string; metadata: WritebackMeta }) => Promise<void>
@@ -429,10 +440,22 @@ export async function runWriteback(deps: WritebackDeps): Promise<WritebackOutcom
     }
 
     const files = changedPaths(own, fork.root)
+    const prompt = summaryPrompt(transcriptText(own), files, deps.config.maxChars)
+    const attempts = modelAttempts(deps.config.model)
     let raw: string
     try {
       raw = await withTimeout(
-        (signal) => deps.generate(summaryPrompt(transcriptText(own), files, deps.config.maxChars), signal),
+        async (signal) => {
+          // The variant may be one the server's model resolution path does not list: drop it once and ask again.
+          for (const [index, model] of attempts.entries()) {
+            try {
+              return await deps.generate(prompt, model, signal)
+            } catch (error) {
+              if (index === attempts.length - 1 || !modelRefused(error)) throw error
+            }
+          }
+          throw new Error("no model to ask")
+        },
         deps.config.timeoutMs,
         deps.timer ?? defaultTimer,
       )

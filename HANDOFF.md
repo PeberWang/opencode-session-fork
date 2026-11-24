@@ -8,6 +8,52 @@ OpenCode Desktop 的 GUI 插件。在助手消息里划选一段文字，点「F
 
 设计与证据见 `DESIGN_FORK.md`，验收见 `ACCEPTANCE.md`。
 
+## 最近一次改动（2026-11-24 第六轮，`BRIEF_WRITEBACK_MODEL_FIX.md`）
+
+写回摘要在真机上失败过一次：`writeback skipped (...): summary failed: Model not found: deepseek/deepseek-flash`。typecheck、test（33/33）、build 都通过，`dist/gui-experimental.cjs` 是这次的构建产物。真机点验待做，见文末。
+
+### 诊断结论：不是 variant，是请求落在别的 location
+
+服务端日志（`~/.local/share/opencode/log/opencode.log`，22:52Z = 本地 16:52）里那一次调用是这样的：
+
+```
+22:52:20.604  读取 ~/.config/opencode/opencode.jsonc
+22:52:20.615  location services booted directory=/Users/mingpeiwang/.config/opencode
+22:52:20.617  POST /api/experimental/generate/text → 404
+22:52:20.717  provider.updated / model.updated（同一个 .config/opencode location 才加载完）
+```
+
+`Generate.text` 的实现（2.2.7 二进制里的 `Generate.text`）先 `ModelResolver.resolve(model)`，拿不到就查该 location 的可用模型列表，再报 `Model not found: <provider>/<id>`，HTTP 404。这次请求被当成 `~/.config/opencode` 这个 location 的请求，新 location 刚启动、provider 还没加载完，所以解析不到 `deepseek-flash`。也就是说：**插件调用的 client 没把 Fork 所在目录带上去，服务端在一个临时启动的 location 里解析模型**，和 variant、凭据都无关。
+
+### 三种写法的实测
+
+对正在运行的桌面端，用 `opencode api` 带上 Fork 项目的目录头发请求，三种写法都返回 `{"data":{"text":"ok"}}`：
+
+- `{"providerID":"deepseek","id":"deepseek-flash","variant":"none"}`
+- `{"providerID":"deepseek","id":"deepseek-flash"}`
+- `{"providerID":"deepseek","id":"deepseek-v4-pro"}`
+
+所以 `#none` 在这条路径上是可用的，默认值保留 `deepseek/deepseek-flash#none`（关闭思考，摘要约 2 秒；开着思考曾超过 20 秒）。
+
+### 改了什么
+
+- **把目录钉在请求上**（`src/gui.tsx`）：`experimental.generate.text` 的第二个参数带上 `headers: { "x-opencode-directory": encodeURIComponent(directory) }`，`directory` 取 `session.directory`，退回 `session.location?.directory`。服务端按这个 location 解析模型，不再临时启动别的 location，也避开了 location 冷启动的竞态。
+- **variant 降级重试一次**（`src/writeback.ts`）：`modelAttempts()` 给出「原样」和「去掉 variant」两个候选；只有报错像模型引用问题（`Model not found` / `Model unavailable` / `Variant unavailable` / `model.variant`）才丢掉 variant 重试，其它错误（断网、超时）不重试。重试成功不额外记日志。整个循环仍受一次 `timeoutMs` 约束。
+- **失败诊断日志**（`src/gui.tsx` 的 generate 接线处，每个失败的尝试一行，成功不记）：
+
+```
+[session-fork] generate failed: model={"providerID":"deepseek","id":"deepseek-flash","variant":"none"} dir=/Users/.../retiring-officials-innovation ref=deepseek/deepseek-flash#none: Model not found: deepseek/deepseek-flash
+```
+
+  之后仍然是原来那一行 `writeback skipped (...)`，两行都在 `renderer.log`。
+- 测试：新增「模型被拒 → 去掉 variant 重试一次并成功」「两次都拒 → 一行日志、结束」「非模型引用错误不重试」等断言，共 33 项。
+
+### 真机点验（待做）
+
+1. 在任意项目里开一个 Fork，让它改一个文件（比如改一行注释），等回复结束。
+2. 关闭 Fork 标签：应弹出「并入主线？」确认框，确认后主会话出现写回 notice。
+3. 若仍失败，把 `renderer.log` 里新的 `[session-fork] generate failed: ...` 整行发回来——它会同时给出 model 对象、目录和 ref。
+
 ## 最近一次改动（2026-11-23 第五轮，`BRIEF_FORK_WRITEBACK.md`）
 
 关闭 Fork 时的受控写回：Fork 期间原会话不动，关闭标签后按用户同意把这段分叉的结论写回原会话一条摘要。typecheck、test（32/32）、build 都通过，`dist/gui-experimental.cjs` 是这次的构建产物。**真机未点验**，清单见 `ACCEPTANCE.md`「第五轮真机验收（写回）」。
